@@ -1,8 +1,6 @@
 # n8n-mysql-docker
 n8n으로 docker 사용해보기 
 
-# n8n & MySQL Docker Compose 프로젝트
-
 ## 📋 프로젝트 개요
 
 Docker 및 Docker Compose를 활용하여 n8n 워크플로우 자동화 툴과 MySQL 데이터베이스를 연동한 프로젝트입니다.
