@@ -1,54 +1,72 @@
-# n8n-mysql-docker
-n8n으로 docker 사용해보기 
-
-# 🪙 실시간 코인 가격 모니터링 시스템
-
-## 📋 프로젝트 개요
-
-Docker 및 Docker Compose를 활용하여 Binance API에서 실시간 코인 가격을 수집하고,
-n8n 워크플로우로 자동화하여 MySQL에 저장 후 Grafana 대시보드로 시각화하는 시스템입니다.
+# 컴퓨터 하드웨어 모니터링 시스템
+> Docker + n8n + MySQL + Grafana 기반 실시간 하드웨어 모니터링 대시보드
 
 ---
 
-## 🛠️ 사용 기술
+## 1. 프로젝트 개요
 
-| 기술 | 버전 | 역할 |
-|------|------|------|
-| Docker | 26.x | 컨테이너 실행 환경 |
-| Docker Compose | v2.x | 멀티 컨테이너 관리 |
-| n8n | latest | 데이터 수집 자동화 |
-| MySQL | 8.0 | 데이터 저장 |
-| Grafana | latest | 실시간 데이터 시각화 |
-| Binance API | - | 코인 가격 데이터 제공 |
-| Ubuntu | 24.04 | 운영체제 |
+VMware 위에 Ubuntu 24.04를 구성하고, Docker Compose로 n8n / MySQL / Grafana 컨테이너를 실행하여
+Python 수집기가 생성한 하드웨어 시뮬레이션 데이터를 n8n 웹훅으로 수신 → MySQL에 저장 → Grafana로 실시간 시각화하는 시스템.
 
 ---
 
-## 📁 프로젝트 구조
+## 2. 개발 환경
+
+| 항목 | 내용 |
+|------|------|
+| 호스트 OS | Windows 11 |
+| 가상화 | VMware Workstation |
+| 게스트 OS | Ubuntu 24.04 LTS |
+| IDE | VS Code + Remote SSH |
+| 컨테이너 | Docker + Docker Compose |
+| 워크플로우 | n8n |
+| 데이터베이스 | MySQL 8.0 |
+| 시각화 | Grafana |
+| 수집기 언어 | Python 3.x |
+
+---
+
+## 3. 시스템 아키텍처
+
+```mermaid
+flowchart TD
+    subgraph HOST["🖥️ Windows Host"]
+        VMW[VMware Workstation]
+    end
+
+    subgraph VM["🐧 Ubuntu 24.04 VM"]
+        PY[collector.py\nPython 수집기]
+
+        subgraph DOCKER["🐳 Docker Compose"]
+            N8N[n8n\nWebhook 수신]
+            MYSQL[(MySQL 8.0\nhw_db.hw_data)]
+            GRAFANA[Grafana\n실시간 대시보드]
+        end
+    end
+
+    VMW --> VM
+    PY -->|POST JSON 5초마다| N8N
+    N8N -->|INSERT SQL| MYSQL
+    MYSQL -->|SELECT 쿼리| GRAFANA
+    GRAFANA -->|Auto refresh 5s| GRAFANA
+```
+
+---
+
+## 4. 디렉토리 구조
 
 ```
-coin-monitor/
-├── docker-compose.yml   # 컨테이너 구성 파일
-├── .env                 # 환경 변수 설정
-└── README.md            # 프로젝트 설명
+n8n-hw-monitor/
+├── docker-compose.yml     ← 컨테이너 구성
+├── .env                   ← 환경변수 (DB 계정 등)
+└── collector.py           ← 하드웨어 데이터 수집 및 전송
 ```
 
 ---
 
-## ⚙️ 환경 변수 (.env)
+## 5. 주요 파일
 
-```env
-MYSQL_ROOT_PASSWORD=rootpassword
-MYSQL_DATABASE=coin_db
-MYSQL_USER=coin_user
-MYSQL_PASSWORD=coinpassword
-N8N_USER=admin
-N8N_PASSWORD=adminpassword
-```
-
----
-
-## 🐳 docker-compose.yml 구성
+### 5-1. docker-compose.yml
 
 ```yaml
 version: '3.8'
@@ -68,7 +86,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
-      - coin-network
+      - hw-network
 
   n8n:
     image: n8nio/n8n
@@ -92,7 +110,7 @@ services:
     depends_on:
       - mysql
     networks:
-      - coin-network
+      - hw-network
 
   grafana:
     image: grafana/grafana
@@ -108,7 +126,7 @@ services:
     depends_on:
       - mysql
     networks:
-      - coin-network
+      - hw-network
 
 volumes:
   mysql_data:
@@ -116,135 +134,226 @@ volumes:
   grafana_data:
 
 networks:
-  coin-network:
+  hw-network:
     driver: bridge
 ```
 
----
+### 5-2. .env
 
-## 🔄 n8n 워크플로우 구성
-
-### 워크플로우 흐름
-```
-Schedule Trigger (10초마다)
-        ↓
-HTTP Request (Binance API 호출)
-        ↓
-Code 노드 (데이터 변환)
-        ↓
-MySQL (테이블 생성)
-        ↓
-MySQL (데이터 삽입)
-        ↓
-MySQL (데이터 조회)
+```env
+MYSQL_ROOT_PASSWORD=rootpassword
+MYSQL_DATABASE=hw_db
+MYSQL_USER=hw_user
+MYSQL_PASSWORD=hwpassword
+N8N_USER=admin
+N8N_PASSWORD=adminpassword
 ```
 
-### Binance API URL
-```
-https://api.binance.com/api/v3/ticker/price?symbols=["BTCUSDT","ETHUSDT"]
-```
+### 5-3. MySQL 테이블 스키마
 
-### 수집 데이터
-```json
-[
-  { "symbol": "BTCUSDT", "price": "66866.38" },
-  { "symbol": "ETHUSDT", "price": "2055.02" }
-]
-```
-
-### MySQL 테이블 구조
 ```sql
-CREATE TABLE IF NOT EXISTS coin_prices (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  symbol VARCHAR(20),
-  price DECIMAL(20, 8),
-  collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE hw_data (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    timestamp      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    cpu_usage      FLOAT,
+    cpu_temp       FLOAT,
+    cpu_clock      FLOAT,
+    gpu_usage      FLOAT,
+    gpu_temp       FLOAT,
+    gpu_clock      FLOAT,
+    ram_used_gb    FLOAT,
+    ram_total_gb   FLOAT,
+    disk_usage     FLOAT,
+    net_latency_ms FLOAT,
+    fan_rpm        INT
 );
 ```
 
-### 데이터 삽입 쿼리
-```sql
-INSERT INTO coin_prices (symbol, price)
-VALUES ('{{ $json.symbol }}', {{ $json.price }});
+### 5-4. collector.py
+
+```python
+import psutil
+import requests
+import time
+import random
+import math
+from ping3 import ping
+
+WEBHOOK_URL = "http://192.168.0.39:5678/webhook/hw-data"
+
+tick = 0
+
+def get_hardware_data():
+    global tick
+    tick += 1
+
+    # 실제 측정
+    cpu_usage = psutil.cpu_percent(interval=1)
+    mem = psutil.virtual_memory()
+    ram_total_gb = round(mem.total / (1024 ** 3), 2)
+    disk_usage = psutil.disk_usage('/').percent
+
+    latency = ping('8.8.8.8', unit='ms')
+    net_latency_ms = latency if latency is not None else 0.0
+
+    # 시뮬레이션 (사인파 + 스파이크)
+    wave = (math.sin(tick * 0.15) + 1) / 2 * 100
+    spike = random.uniform(20, 50) if random.random() < 0.1 else 0
+    cpu_sim = cpu_usage * 0.4 + wave * 0.4 + spike + random.uniform(-5, 5)
+    cpu_sim = max(5.0, min(100.0, cpu_sim))
+
+    cpu_clock = 3.5 + (cpu_sim / 100) * 1.9 + random.uniform(-0.3, 0.3)
+    cpu_temp  = 42.0 + (cpu_sim * 0.45) + random.uniform(-4.0, 4.0)
+
+    gpu_wave  = (math.sin(tick * 0.1 + 1.5) + 1) / 2 * 100
+    gpu_spike = random.uniform(30, 60) if random.random() < 0.08 else 0
+    gpu_usage = gpu_wave * 0.6 + cpu_sim * 0.3 + gpu_spike + random.uniform(-8, 8)
+    gpu_usage = max(0.0, min(100.0, gpu_usage))
+
+    gpu_temp  = 38.0 + (gpu_usage * 0.4) + random.uniform(-3.0, 3.0)
+    gpu_clock = 800 + (gpu_usage * 18) + random.uniform(-100, 100)
+
+    max_temp  = max(cpu_temp, gpu_temp)
+    fan_rpm   = 1200 + ((max_temp - 40) * 90) + random.uniform(-200, 200)
+    fan_rpm   = max(800, min(6500, fan_rpm))
+
+    # RAM 시뮬레이션
+    ram_wave    = (math.sin(tick * 0.12 + 2.0) + 1) / 2
+    ram_used_gb = round(ram_total_gb * 0.3 + ram_wave * (ram_total_gb * 0.5) + random.uniform(-0.2, 0.2), 2)
+    ram_used_gb = max(0.5, min(ram_total_gb, ram_used_gb))
+
+    # 네트워크 레이턴시 스파이크
+    latency_spike  = random.uniform(50, 200) if random.random() < 0.12 else 0
+    net_latency_ms = net_latency_ms + latency_spike + random.uniform(-5, 5)
+    net_latency_ms = max(1.0, net_latency_ms)
+
+    return {
+        "cpu_usage":      round(cpu_sim, 2),
+        "cpu_temp":       round(cpu_temp, 2),
+        "cpu_clock":      round(cpu_clock, 2),
+        "gpu_usage":      round(gpu_usage, 2),
+        "gpu_temp":       round(gpu_temp, 2),
+        "gpu_clock":      round(gpu_clock, 2),
+        "ram_used_gb":    round(ram_used_gb, 2),
+        "ram_total_gb":   ram_total_gb,
+        "disk_usage":     round(disk_usage, 2),
+        "net_latency_ms": round(net_latency_ms, 2),
+        "fan_rpm":        int(fan_rpm)
+    }
+
+def main():
+    print("🚀 하드웨어 모니터링 수집기 시작...")
+    while True:
+        try:
+            data = get_hardware_data()
+            requests.post(WEBHOOK_URL, json=data)
+            print(f"[{time.strftime('%H:%M:%S')}] "
+                  f"CPU: {data['cpu_usage']}% {data['cpu_temp']}°C | "
+                  f"GPU: {data['gpu_usage']}% {data['gpu_temp']}°C | "
+                  f"RAM: {data['ram_used_gb']}GB | "
+                  f"Fan: {data['fan_rpm']}RPM | "
+                  f"Net: {data['net_latency_ms']}ms")
+            time.sleep(5)
+        except requests.exceptions.RequestException as e:
+            print(f"네트워크 오류: {e}")
+            time.sleep(10)
+        except KeyboardInterrupt:
+            print("\n종료합니다.")
+            break
+
+if __name__ == "__main__":
+    main()
 ```
 
 ---
 
-## 📊 Grafana 대시보드 구성
+## 6. n8n 워크플로우 구성
 
-### MySQL 데이터 소스 설정
-| 항목 | 값 |
+| 노드 | 설정 |
 |------|------|
-| Host | `mysql:3306` |
-| Database | `coin_db` |
-| User | `coin_user` |
-| Password | `coinpassword` |
+| Webhook | Method: POST / Path: `hw-data` |
+| MySQL | Execute SQL / INSERT INTO hw_data |
 
-### BTC 가격 그래프 쿼리
-```sql
-SELECT
-  collected_at AS time,
-  price AS value,
-  symbol AS metric
-FROM coin_prices
-WHERE symbol = 'BTCUSDT'
-AND collected_at >= NOW() - INTERVAL 5 MINUTE
-ORDER BY collected_at ASC
-```
+### MySQL INSERT 쿼리
 
-### ETH 가격 그래프 쿼리
 ```sql
-SELECT
-  collected_at AS time,
-  price AS value,
-  symbol AS metric
-FROM coin_prices
-WHERE symbol = 'ETHUSDT'
-AND collected_at >= NOW() - INTERVAL 5 MINUTE
-ORDER BY collected_at ASC
+INSERT INTO hw_data
+(cpu_usage, cpu_temp, cpu_clock, gpu_usage, gpu_temp, gpu_clock,
+ ram_used_gb, ram_total_gb, disk_usage, net_latency_ms, fan_rpm)
+VALUES
+({{ $json.body.cpu_usage }}, {{ $json.body.cpu_temp }}, {{ $json.body.cpu_clock }},
+ {{ $json.body.gpu_usage }}, {{ $json.body.gpu_temp }}, {{ $json.body.gpu_clock }},
+ {{ $json.body.ram_used_gb }}, {{ $json.body.ram_total_gb }}, {{ $json.body.disk_usage }},
+ {{ $json.body.net_latency_ms }}, {{ $json.body.fan_rpm }});
 ```
 
 ---
 
-## 🚀 실행 방법
+## 7. Grafana 대시보드 구성
 
-### 1. 컨테이너 실행
+### 자동 새로고침 설정
+- Refresh: `5s`
+- 시간 범위: `Last 5 minutes`
+
+### 게이지 바 패널 (6개)
+
+| 패널 | 쿼리 | Unit | Max |
+|------|------|------|-----|
+| 🌡️ CPU 온도 | `SELECT cpu_temp FROM hw_data ORDER BY timestamp DESC LIMIT 1` | °C | 100 |
+| ⚡ CPU 클럭 | `SELECT cpu_clock FROM hw_data ORDER BY timestamp DESC LIMIT 1` | GHz | 6 |
+| 🖥️ CPU 사용률 | `SELECT cpu_usage FROM hw_data ORDER BY timestamp DESC LIMIT 1` | % | 100 |
+| 🔥 GPU 온도 | `SELECT gpu_temp FROM hw_data ORDER BY timestamp DESC LIMIT 1` | °C | 100 |
+| ⚡ GPU 클럭 | `SELECT gpu_clock FROM hw_data ORDER BY timestamp DESC LIMIT 1` | MHz | 3000 |
+| 🎮 GPU 사용률 | `SELECT gpu_usage FROM hw_data ORDER BY timestamp DESC LIMIT 1` | % | 100 |
+
+### Time Series 패널
+
+| 패널 | 쿼리 |
+|------|------|
+| CPU 모니터링 | `SELECT timestamp AS time, cpu_temp, cpu_usage FROM hw_data WHERE timestamp >= NOW() - INTERVAL 5 MINUTE ORDER BY timestamp ASC` |
+| GPU 모니터링 | `SELECT timestamp AS time, gpu_temp, gpu_usage FROM hw_data WHERE timestamp >= NOW() - INTERVAL 5 MINUTE ORDER BY timestamp ASC` |
+| RAM 사용량 | `SELECT timestamp AS time, ram_used_gb FROM hw_data WHERE timestamp >= NOW() - INTERVAL 5 MINUTE ORDER BY timestamp ASC` |
+| 팬 RPM | `SELECT timestamp AS time, fan_rpm FROM hw_data WHERE timestamp >= NOW() - INTERVAL 5 MINUTE ORDER BY timestamp ASC` |
+| 네트워크 레이턴시 | `SELECT timestamp AS time, net_latency_ms FROM hw_data WHERE timestamp >= NOW() - INTERVAL 5 MINUTE ORDER BY timestamp ASC` |
+
+---
+
+## 8. 실행 방법
+
 ```bash
+# 1. 컨테이너 실행
+cd n8n-hw-monitor
 docker compose up -d
-```
 
-### 2. 실행 상태 확인
-```bash
+# 2. 상태 확인
 docker compose ps
+
+# 3. 데이터 수집기 실행
+python3 collector.py
 ```
 
-### 3. 서비스 접속
+### 접속 주소
 
-| 서비스 | 주소 | ID | PW |
-|------|------|------|------|
-| n8n | `http://[IP]:5678` | admin | adminpassword |
-| Grafana | `http://[IP]:3000` | admin | admin |
-
----
-
-## 🌐 네트워크 구성
-
-- 브릿지 네트워크 `coin-network` 사용
-- n8n → MySQL 컨테이너 이름으로 내부 통신
-- Grafana → MySQL 컨테이너 이름으로 내부 통신
+| 서비스 | 주소 |
+|--------|------|
+| n8n | http://192.168.0.39:5678 |
+| Grafana | http://192.168.0.39:3000 |
+| MySQL | 192.168.0.39:3306 |
 
 ---
 
-## 📌 개발 환경
+## 9. 수집 데이터 항목
 
-- **Host OS**: Windows
-- **VM**: VMware Workstation
-- **Guest OS**: Ubuntu 24.04
-- **IDE**: VSCode (Remote-SSH 원격 접속)
-
----
-
-## 👤 개발자
-
-- GitHub: [ChoiYunSik02](https://github.com/ChoiYunSik02)
-
+| 항목 | 설명 | 측정 방식 |
+|------|------|-----------|
+| cpu_usage | CPU 사용률 (%) | 실제 측정 + 시뮬레이션 |
+| cpu_temp | CPU 온도 (°C) | 시뮬레이션 |
+| cpu_clock | CPU 클럭 (GHz) | 시뮬레이션 |
+| gpu_usage | GPU 사용률 (%) | 시뮬레이션 |
+| gpu_temp | GPU 온도 (°C) | 시뮬레이션 |
+| gpu_clock | GPU 클럭 (MHz) | 시뮬레이션 |
+| ram_used_gb | RAM 사용량 (GB) | 실제 측정 + 시뮬레이션 |
+| ram_total_gb | RAM 전체 용량 (GB) | 실제 측정 |
+| disk_usage | 디스크 사용률 (%) | 실제 측정 |
+| net_latency_ms | 네트워크 레이턴시 (ms) | 실제 측정 + 스파이크 |
+| fan_rpm | 쿨링팬 RPM | 시뮬레이션 |
