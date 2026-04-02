@@ -357,3 +357,8 @@ python3 collector.py
 | disk_usage | 디스크 사용률 (%) | 실제 측정 |
 | net_latency_ms | 네트워크 레이턴시 (ms) | 실제 측정 + 스파이크 |
 | fan_rpm | 쿨링팬 RPM | 시뮬레이션 |
+
+
+## 10. 실행영상
+https://github.com/user-attachments/assets/c88b2e48-ca19-4ab7-bcca-af0f8b35e563
+
